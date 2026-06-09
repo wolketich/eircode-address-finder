@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eircode Address Finder</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="wrap">
+    <h1>Eircode Address Finder</h1>
+    <p class="hint">Highlight an Eircode, right-click, then choose “Find address for selected Eircode”. You can also press Alt + Shift + E.</p>
+
+    <form id="lookupForm" class="manual">
+      <label for="eircodeInput">Manual lookup</label>
+      <div class="row">
+        <input id="eircodeInput" type="text" placeholder="A98 A6F9" autocomplete="off">
+        <button type="submit">Find</button>
+      </div>
+      <p id="status" class="status"></p>
+    </form>
+
+    <section id="result" class="result hidden">
+      <div class="label">Last address</div>
+      <div id="address" class="address"></div>
+      <div id="meta" class="meta"></div>
+      <div class="buttons">
+        <a id="maps" href="#" target="_blank" rel="noopener noreferrer">Open Maps</a>
+        <button id="copyAddress" type="button">Copy address</button>
+      </div>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
