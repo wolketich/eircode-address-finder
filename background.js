@@ -2,7 +2,7 @@ const AUTOADDRESS_KEY = (() => {
   if (typeof process !== "undefined" && process.env?.AUTOADDRESS_KEY) {
     return process.env.AUTOADDRESS_KEY;
   }
-  return "PUT-YOUR-API-KEY-HERE";
+  return "9D3F13CF-DD01-FAED-F9DE-20FDAF06FD27";
 })();
 const AUTOADDRESS_URL = "https://api.autoaddress.ie/2.0/findaddress";
 const MENU_ID = "lookup-selected-eircode";
