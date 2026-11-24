@@ -1,10 +1,17 @@
-const AUTOADDRESS_KEY = (() => {
-  if (typeof process !== "undefined" && process.env?.AUTOADDRESS_KEY) {
-    return process.env.AUTOADDRESS_KEY;
+if (typeof importScripts === "function") {
+  try {
+    importScripts("config.local.js");
+  } catch (error) {
+    if (error.name !== "NetworkError") throw error;
   }
-  return "9D3F13CF-DD01-FAED-F9DE-20FDAF06FD27";
-})();
+}
+
+const config = globalThis.EIRCODE_FINDER_CONFIG || {};
+const AUTOADDRESS_KEY = (typeof process !== "undefined" && process.env?.AUTOADDRESS_KEY) || config.autoaddressKey || "";
+const HOME_EIRCODE = config.homeEircode || "";
 const AUTOADDRESS_URL = "https://api.autoaddress.ie/2.0/findaddress";
+const ECAD_DATA_URL = "https://api.autoaddress.ie/2.0/GetEcadData";
+const OSRM_URL = "https://router.project-osrm.org/route/v1/driving";
 const MENU_ID = "lookup-selected-eircode";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -75,9 +82,17 @@ async function lookupSelectedText(rawText, tabId) {
 }
 
 async function lookupAddress(rawEircode) {
+  return lookupAddressCore(rawEircode, { includeTravel: true });
+}
+
+async function lookupAddressCore(rawEircode, { includeTravel = false } = {}) {
   const eircode = extractEircode(rawEircode);
   if (!eircode) {
     throw new Error("Enter a valid Eircode, for example A98 A6F9.");
+  }
+
+  if (!AUTOADDRESS_KEY || AUTOADDRESS_KEY === "YOUR_AUTOADDRESS_KEY_HERE") {
+    throw new Error("Set your Autoaddress API key in config.local.js.");
   }
 
   const url = `${AUTOADDRESS_URL}?language=en&country=ie&key=${encodeURIComponent(AUTOADDRESS_KEY)}&address=${encodeURIComponent(eircode)}`;
@@ -94,7 +109,101 @@ async function lookupAddress(rawEircode) {
     throw new Error(data?.result?.text || "No address found for this Eircode.");
   }
 
+  if (includeTravel) {
+    payload.travel = await computeTravelInfo(payload.addressId);
+  }
+
   return payload;
+}
+
+async function fetchEcadCoordinates(addressId) {
+  if (!addressId) return null;
+
+  const url = `${ECAD_DATA_URL}?key=${encodeURIComponent(AUTOADDRESS_KEY)}&ecadid=${encodeURIComponent(addressId)}`;
+
+  try {
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const spatial = data?.spatialInfo;
+    if (!spatial || String(spatial.spatialAccuracy) === "4") return null;
+
+    const location = spatial?.etrs89?.location;
+    if (!Number.isFinite(location?.latitude) || !Number.isFinite(location?.longitude)) return null;
+
+    return { latitude: location.latitude, longitude: location.longitude };
+  } catch {
+    return null;
+  }
+}
+
+async function getHomeCoordinates() {
+  const stored = await chrome.storage.local.get("homeCoords");
+  if (stored.homeCoords) return stored.homeCoords;
+
+  const homePayload = await lookupAddressCore(HOME_EIRCODE, { includeTravel: false });
+  const coords = await fetchEcadCoordinates(homePayload.addressId);
+  if (coords) {
+    await chrome.storage.local.set({ homeCoords: coords });
+  }
+  return coords;
+}
+
+async function fetchDrivingRoute(origin, destination) {
+  const coords = `${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}`;
+  const url = `${OSRM_URL}/${coords}?overview=false`;
+
+  try {
+    const response = await fetch(url, { method: "GET" });
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const route = data?.routes?.[0];
+    if (!route) return null;
+
+    return {
+      distanceMeters: route.distance,
+      durationSeconds: route.duration
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function formatDuration(seconds) {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
+}
+
+async function computeTravelInfo(destAddressId) {
+  if (!HOME_EIRCODE || !destAddressId) return null;
+
+  const [origin, destination] = await Promise.all([
+    getHomeCoordinates(),
+    fetchEcadCoordinates(destAddressId)
+  ]);
+
+  if (!origin || !destination) return null;
+
+  const route = await fetchDrivingRoute(origin, destination);
+  if (!route) return null;
+
+  return {
+    fromEircode: formatEircode(HOME_EIRCODE),
+    distanceText: formatDistance(route.distanceMeters),
+    durationText: formatDuration(route.durationSeconds),
+    distanceMeters: route.distanceMeters,
+    durationSeconds: route.durationSeconds
+  };
 }
 
 function parseAutoaddressResponse(data, searchedEircode) {
@@ -129,7 +238,8 @@ function parseAutoaddressResponse(data, searchedEircode) {
     matchLevel: data?.matchLevel?.text || "",
     totalOptions: Number.isFinite(data?.totalOptions) ? data.totalOptions : options.length,
     options,
-    lookedUpAt: new Date().toISOString()
+    lookedUpAt: new Date().toISOString(),
+    travel: null
   };
 }
 
@@ -170,16 +280,35 @@ function renderEircodeOverlay(payload) {
   const host = document.createElement("div");
   host.id = "eircode-address-finder-overlay";
   host.style.position = "fixed";
+  host.style.inset = "0";
   host.style.zIndex = "2147483647";
-  host.style.top = "18px";
-  host.style.right = "18px";
   document.documentElement.appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
 
+  function closeOverlay() {
+    document.removeEventListener("keydown", onEscape);
+    host.remove();
+  }
+
+  function onEscape(event) {
+    if (event.key === "Escape") closeOverlay();
+  }
+
+  document.addEventListener("keydown", onEscape);
+
   const style = document.createElement("style");
   style.textContent = `
     * { box-sizing: border-box; }
+    .backdrop {
+      position: fixed;
+      inset: 0;
+    }
+    .panel {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+    }
     .card {
       width: min(430px, calc(100vw - 36px));
       max-height: calc(100vh - 36px);
@@ -233,9 +362,19 @@ function renderEircodeOverlay(payload) {
   `;
   shadow.appendChild(style);
 
+  const backdrop = document.createElement("div");
+  backdrop.className = "backdrop";
+  backdrop.addEventListener("click", closeOverlay);
+  shadow.appendChild(backdrop);
+
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  panel.addEventListener("click", (event) => event.stopPropagation());
+  shadow.appendChild(panel);
+
   const card = document.createElement("div");
   card.className = "card";
-  shadow.appendChild(card);
+  panel.appendChild(card);
 
   const top = document.createElement("div");
   top.className = "top";
@@ -259,7 +398,7 @@ function renderEircodeOverlay(payload) {
   close.type = "button";
   close.textContent = "×";
   close.title = "Close";
-  close.addEventListener("click", () => host.remove());
+  close.addEventListener("click", closeOverlay);
   top.appendChild(close);
 
   const badge = document.createElement("div");
@@ -291,7 +430,7 @@ function renderEircodeOverlay(payload) {
   addressBox.textContent = payload.primaryAddress || "No address returned.";
   card.appendChild(addressBox);
 
-  card.appendChild(detailGrid([
+  const detailRows = [
     ["Eircode", payload.postcode || payload.searchedEircode || ""],
     ["Address ID", payload.addressId || ""],
     ["Address type", payload.addressType || ""],
@@ -299,7 +438,18 @@ function renderEircodeOverlay(payload) {
     ["Unique address", payload.isUniqueAddress ? "Yes" : "No"],
     ["Options", String(payload.totalOptions ?? payload.options?.length ?? 0)],
     ["Result", payload.resultText || ""]
-  ].filter((row) => row[1] !== "" && row[1] !== null && row[1] !== undefined)));
+  ];
+
+  if (payload.travel) {
+    detailRows.push(
+      [`Distance from ${payload.travel.fromEircode}`, payload.travel.distanceText],
+      ["Drive time", payload.travel.durationText]
+    );
+  }
+
+  card.appendChild(detailGrid(
+    detailRows.filter((row) => row[1] !== "" && row[1] !== null && row[1] !== undefined)
+  ));
 
   const buttons = document.createElement("div");
   buttons.className = "buttons";
@@ -339,7 +489,7 @@ function renderEircodeOverlay(payload) {
   closeButton.className = "action";
   closeButton.type = "button";
   closeButton.textContent = "Close";
-  closeButton.addEventListener("click", () => host.remove());
+  closeButton.addEventListener("click", closeOverlay);
   buttons.appendChild(closeButton);
 
   if (Array.isArray(payload.options) && payload.options.length > 0) {

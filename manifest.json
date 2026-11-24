@@ -10,7 +10,8 @@
     "storage"
   ],
   "host_permissions": [
-    "https://api.autoaddress.ie/*"
+    "https://api.autoaddress.ie/*",
+    "https://router.project-osrm.org/*"
   ],
   "background": {
     "service_worker": "background.js"

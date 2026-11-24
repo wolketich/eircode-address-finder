@@ -1,11 +1,11 @@
 Eircode Address Finder
 
 How to install:
-1. Open Chrome.
-2. Go to chrome://extensions.
-3. Turn on Developer mode.
-4. Click Load unpacked.
-5. Select this folder.
+1. Copy config.local.js.example to config.local.js.
+2. Enter your Autoaddress API key in config.local.js. Optionally enter a starting Eircode in homeEircode to see driving distances and times.
+3. Open Chrome and go to chrome://extensions.
+4. Turn on Developer mode.
+5. Click Load unpacked and select this folder.
 
 How to use:
 1. Highlight an Eircode on any webpage.

@@ -1,0 +1,4 @@
+globalThis.EIRCODE_FINDER_CONFIG = {
+  autoaddressKey: "YOUR_AUTOADDRESS_KEY_HERE",
+  homeEircode: ""
+};

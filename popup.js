@@ -4,6 +4,7 @@ const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
 const addressEl = document.getElementById("address");
 const metaEl = document.getElementById("meta");
+const travelEl = document.getElementById("travel");
 const mapsEl = document.getElementById("maps");
 const copyAddressEl = document.getElementById("copyAddress");
 
@@ -54,4 +55,12 @@ function renderResult(payload) {
   if (payload.addressType) meta.push(`Type: ${payload.addressType}`);
   if (payload.matchLevel) meta.push(`Match: ${payload.matchLevel}`);
   metaEl.textContent = meta.join(" · ");
+
+  if (payload.travel) {
+    travelEl.classList.remove("hidden");
+    travelEl.textContent = `${payload.travel.distanceText} from ${payload.travel.fromEircode} · ${payload.travel.durationText} drive`;
+  } else {
+    travelEl.classList.add("hidden");
+    travelEl.textContent = "";
+  }
 }

@@ -28,4 +28,4 @@ Thumbs.db
 *.njsproj
 *.sln
 
-background.js
+config.local.js
